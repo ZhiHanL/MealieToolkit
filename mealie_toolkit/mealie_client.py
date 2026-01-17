@@ -230,3 +230,78 @@ class MealieClient:
             response = client.post(url, json=payload, headers=self.headers)
             response.raise_for_status()
             return response.json()
+
+    def fetch_tags(self) -> list[dict]:
+        """
+        Fetch all tags from the Mealie instance.
+
+        Returns:
+            List of tag dictionaries
+
+        Raises:
+            httpx.HTTPError: If the API request fails
+        """
+        url = f"{self.base_url}/api/organizers/tags"
+
+        with httpx.Client() as client:
+            response = client.get(url, headers=self.headers)
+            response.raise_for_status()
+            data = response.json()
+
+            # Handle paginated response
+            if isinstance(data, dict) and "items" in data:
+                return data.get("items", [])
+            # Handle direct list response
+            elif isinstance(data, list):
+                return data
+            return []
+
+    def add_recipe_tag(self, recipe_slug: str, tag_name: str) -> dict:
+        """
+        Add a tag to a recipe.
+
+        Args:
+            recipe_slug: The slug of the recipe to tag
+            tag_name: The name of the tag to add
+
+        Returns:
+            Updated recipe data dictionary
+
+        Raises:
+            httpx.HTTPError: If the API request fails
+        """
+        # Fetch all tags from Mealie to find the matching tag
+        all_tags = self.fetch_tags()
+        tag_to_add = None
+        
+        for tag in all_tags:
+            if tag.get("name", "").lower() == tag_name.lower():
+                tag_to_add = tag
+                break
+        
+        if not tag_to_add:
+            raise ValueError(f"Tag '{tag_name}' not found in Mealie instance")
+        
+        # Add the full tag object from Mealie to existing tags
+        updated_tags = [tag_to_add]
+        
+        url = f"{self.base_url}/api/recipes/{recipe_slug}"
+        payload = {"tags": updated_tags}
+
+        with httpx.Client() as client:
+            response = client.patch(url, json=payload, headers=self.headers)
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                # Include response body in error for debugging
+                error_detail = ""
+                try:
+                    error_detail = e.response.json()
+                except:
+                    error_detail = e.response.text
+                raise httpx.HTTPStatusError(
+                    f"{e.response.status_code} {e.response.reason_phrase}: {error_detail}",
+                    request=e.request,
+                    response=e.response,
+                ) from e
+            return response.json()

@@ -5,7 +5,7 @@ from typing import Optional
 import httpx
 
 
-class CategorizerClient:
+class OllamaClient:
     """Client for using Ollama to categorize recipes."""
 
     def __init__(
@@ -71,3 +71,64 @@ Return only the category name, no other text
             return ""
 
         return result_text
+
+    def check_tag_applies(self, recipe: dict, tag: str) -> bool:
+        """
+        Use Ollama to check if a tag applies to a recipe.
+
+        Args:
+            recipe: The recipe dictionary with full details
+            tag: The tag to check (e.g., "vegetarian", "quick", "spicy")
+
+        Returns:
+            True if the tag applies to the recipe, False otherwise
+
+        Raises:
+            httpx.HTTPError: If the API request fails
+            ValueError: If Ollama response is invalid
+        """
+        # Extract recipe details
+        recipe_name = recipe.get("name", "Unknown")
+        description = recipe.get("description", "")
+        ingredients = recipe.get("recipeIngredient", [])
+        
+        # Build ingredient list
+        ingredient_text = ""
+        if ingredients:
+            ingredient_names = []
+            for ing in ingredients:
+                if isinstance(ing, dict):
+                    ing_name = ing.get("ingredient", {}).get("name", "")
+                    if ing_name:
+                        ingredient_names.append(ing_name)
+            if ingredient_names:
+                ingredient_text = f"\nIngredients: {', '.join(ingredient_names[:15])}"  # Limit to first 15
+        
+        # Build the prompt with full recipe details
+        prompt = f"""Based on this recipe, does it appear to be {tag}?
+
+Recipe Name: {recipe_name}
+Description: {description}{ingredient_text}
+
+Answer with only "YES" or "NO", nothing else.
+"""
+
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        if "response" not in data:
+            raise ValueError("Invalid response from Ollama")
+
+        result_text = data["response"].strip().upper()
+
+        # Parse the response
+        return result_text.startswith("YES")
